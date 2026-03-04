@@ -1,5 +1,5 @@
 import express from 'express';
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import { promises as fs } from 'fs';
@@ -7,6 +7,7 @@ import { extractProjectDirectory } from '../projects.js';
 
 const router = express.Router();
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 // Helper function to get the actual project path from the encoded project name
 async function getActualProjectPath(projectName) {
@@ -167,13 +168,14 @@ router.post('/commit', async (req, res) => {
     // Validate git repository
     await validateGitRepository(projectPath);
     
-    // Stage selected files
-    for (const file of files) {
-      await execAsync(`git add "${file}"`, { cwd: projectPath });
+    // Stage selected files in a single command for better performance
+    if (files.length > 0) {
+      // Use execFileAsync to avoid shell command injection and handle large number of files safely
+      await execFileAsync('git', ['add', ...files], { cwd: projectPath });
     }
     
     // Commit with message
-    const { stdout } = await execAsync(`git commit -m "${message.replace(/"/g, '\\"')}"`, { cwd: projectPath });
+    const { stdout } = await execFileAsync('git', ['commit', '-m', message], { cwd: projectPath });
     
     res.json({ success: true, output: stdout });
   } catch (error) {
