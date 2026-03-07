@@ -17,10 +17,6 @@ router.get('/cli/list', async (req, res) => {
   try {
     console.log('📋 Listing MCP servers using Claude CLI');
     
-    const { spawn } = await import('child_process');
-    const { promisify } = await import('util');
-    const exec = promisify(spawn);
-    
     const process = spawn('claude', ['mcp', 'list', '-s', 'user'], {
       stdio: ['pipe', 'pipe', 'pipe']
     });
@@ -61,8 +57,6 @@ router.post('/cli/add', async (req, res) => {
     const { name, type = 'stdio', command, args = [], url, headers = {}, env = {} } = req.body;
     
     console.log('➕ Adding MCP server using Claude CLI:', name);
-    
-    const { spawn } = await import('child_process');
     
     let cliArgs = ['mcp', 'add'];
     
@@ -134,8 +128,6 @@ router.delete('/cli/remove/:name', async (req, res) => {
     
     console.log('🗑️ Removing MCP server using Claude CLI:', name);
     
-    const { spawn } = await import('child_process');
-    
     const process = spawn('claude', ['mcp', 'remove', '-s', 'user', name], {
       stdio: ['pipe', 'pipe', 'pipe']
     });
@@ -176,8 +168,6 @@ router.get('/cli/get/:name', async (req, res) => {
     const { name } = req.params;
     
     console.log('📄 Getting MCP server details using Claude CLI:', name);
-    
-    const { spawn } = await import('child_process');
     
     const process = spawn('claude', ['mcp', 'get', '-s', 'user', name], {
       stdio: ['pipe', 'pipe', 'pipe']

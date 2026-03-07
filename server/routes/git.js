@@ -1,12 +1,43 @@
 import express from 'express';
-import { exec } from 'child_process';
-import { promisify } from 'util';
+import { spawn } from 'child_process';
 import path from 'path';
 import { promises as fs } from 'fs';
 import { extractProjectDirectory } from '../projects.js';
 
 const router = express.Router();
-const execAsync = promisify(exec);
+
+// Helper function to execute git commands safely using spawn
+const runGit = (args, cwd) => {
+  return new Promise((resolve, reject) => {
+    const gitProcess = spawn('git', args, { cwd });
+    let stdout = '';
+    let stderr = '';
+
+    gitProcess.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    gitProcess.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    gitProcess.on('close', (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        const error = new Error(`Git command failed with code ${code}: ${stderr}`);
+        error.code = code;
+        error.stderr = stderr;
+        error.stdout = stdout;
+        reject(error);
+      }
+    });
+
+    gitProcess.on('error', (err) => {
+      reject(err);
+    });
+  });
+};
 
 // Helper function to get the actual project path from the encoded project name
 async function getActualProjectPath(projectName) {
@@ -30,7 +61,7 @@ async function validateGitRepository(projectPath) {
 
   try {
     // Use --show-toplevel to get the root of the git repository
-    const { stdout: gitRoot } = await execAsync('git rev-parse --show-toplevel', { cwd: projectPath });
+    const { stdout: gitRoot } = await runGit(['rev-parse', '--show-toplevel'], projectPath);
     const normalizedGitRoot = path.resolve(gitRoot.trim());
     const normalizedProjectPath = path.resolve(projectPath);
     
@@ -62,10 +93,10 @@ router.get('/status', async (req, res) => {
     await validateGitRepository(projectPath);
 
     // Get current branch
-    const { stdout: branch } = await execAsync('git rev-parse --abbrev-ref HEAD', { cwd: projectPath });
+    const { stdout: branch } = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath);
     
     // Get git status
-    const { stdout: statusOutput } = await execAsync('git status --porcelain', { cwd: projectPath });
+    const { stdout: statusOutput } = await runGit(['status', '--porcelain'], projectPath);
     
     const modified = [];
     const added = [];
@@ -124,7 +155,7 @@ router.get('/diff', async (req, res) => {
     await validateGitRepository(projectPath);
     
     // Check if file is untracked
-    const { stdout: statusOutput } = await execAsync(`git status --porcelain "${file}"`, { cwd: projectPath });
+    const { stdout: statusOutput } = await runGit(['status', '--porcelain', file], projectPath);
     const isUntracked = statusOutput.startsWith('??');
     
     let diff;
@@ -136,12 +167,12 @@ router.get('/diff', async (req, res) => {
              lines.map(line => `+${line}`).join('\n');
     } else {
       // Get diff for tracked files
-      const { stdout } = await execAsync(`git diff HEAD -- "${file}"`, { cwd: projectPath });
+      const { stdout } = await runGit(['diff', 'HEAD', '--', file], projectPath);
       diff = stdout || '';
       
       // If no unstaged changes, check for staged changes
       if (!diff) {
-        const { stdout: stagedDiff } = await execAsync(`git diff --cached -- "${file}"`, { cwd: projectPath });
+        const { stdout: stagedDiff } = await runGit(['diff', '--cached', '--', file], projectPath);
         diff = stagedDiff;
       }
     }
@@ -169,11 +200,11 @@ router.post('/commit', async (req, res) => {
     
     // Stage selected files
     for (const file of files) {
-      await execAsync(`git add "${file}"`, { cwd: projectPath });
+      await runGit(['add', file], projectPath);
     }
     
     // Commit with message
-    const { stdout } = await execAsync(`git commit -m "${message.replace(/"/g, '\\"')}"`, { cwd: projectPath });
+    const { stdout } = await runGit(['commit', '-m', message], projectPath);
     
     res.json({ success: true, output: stdout });
   } catch (error) {
@@ -198,7 +229,7 @@ router.get('/branches', async (req, res) => {
     await validateGitRepository(projectPath);
     
     // Get all branches
-    const { stdout } = await execAsync('git branch -a', { cwd: projectPath });
+    const { stdout } = await runGit(['branch', '-a'], projectPath);
     
     // Parse branches
     const branches = stdout
@@ -237,7 +268,7 @@ router.post('/checkout', async (req, res) => {
     const projectPath = await getActualProjectPath(project);
     
     // Checkout the branch
-    const { stdout } = await execAsync(`git checkout "${branch}"`, { cwd: projectPath });
+    const { stdout } = await runGit(['checkout', branch], projectPath);
     
     res.json({ success: true, output: stdout });
   } catch (error) {
@@ -258,7 +289,7 @@ router.post('/create-branch', async (req, res) => {
     const projectPath = await getActualProjectPath(project);
     
     // Create and checkout new branch
-    const { stdout } = await execAsync(`git checkout -b "${branch}"`, { cwd: projectPath });
+    const { stdout } = await runGit(['checkout', '-b', branch], projectPath);
     
     res.json({ success: true, output: stdout });
   } catch (error) {
@@ -279,9 +310,9 @@ router.get('/commits', async (req, res) => {
     const projectPath = await getActualProjectPath(project);
     
     // Get commit log with stats
-    const { stdout } = await execAsync(
-      `git log --pretty=format:'%H|%an|%ae|%ad|%s' --date=relative -n ${limit}`,
-      { cwd: projectPath }
+    const { stdout } = await runGit(
+      ['log', "--pretty=format:%H|%an|%ae|%ad|%s", '--date=relative', '-n', String(limit)],
+      projectPath
     );
     
     const commits = stdout
@@ -301,9 +332,9 @@ router.get('/commits', async (req, res) => {
     // Get stats for each commit
     for (const commit of commits) {
       try {
-        const { stdout: stats } = await execAsync(
-          `git show --stat --format='' ${commit.hash}`,
-          { cwd: projectPath }
+        const { stdout: stats } = await runGit(
+          ['show', '--stat', "--format=", commit.hash],
+          projectPath
         );
         commit.stats = stats.trim().split('\n').pop(); // Get the summary line
       } catch (error) {
@@ -330,10 +361,7 @@ router.get('/commit-diff', async (req, res) => {
     const projectPath = await getActualProjectPath(project);
     
     // Get diff for the commit
-    const { stdout } = await execAsync(
-      `git show ${commit}`,
-      { cwd: projectPath }
-    );
+    const { stdout } = await runGit(['show', commit], projectPath);
     
     res.json({ diff: stdout });
   } catch (error) {
@@ -357,10 +385,7 @@ router.post('/generate-commit-message', async (req, res) => {
     let combinedDiff = '';
     for (const file of files) {
       try {
-        const { stdout } = await execAsync(
-          `git diff HEAD -- "${file}"`,
-          { cwd: projectPath }
-        );
+        const { stdout } = await runGit(['diff', 'HEAD', '--', file], projectPath);
         if (stdout) {
           combinedDiff += `\n--- ${file} ---\n${stdout}`;
         }
@@ -433,14 +458,14 @@ router.get('/remote-status', async (req, res) => {
     await validateGitRepository(projectPath);
 
     // Get current branch
-    const { stdout: currentBranch } = await execAsync('git rev-parse --abbrev-ref HEAD', { cwd: projectPath });
+    const { stdout: currentBranch } = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath);
     const branch = currentBranch.trim();
 
     // Check if there's a remote tracking branch (smart detection)
     let trackingBranch;
     let remoteName;
     try {
-      const { stdout } = await execAsync(`git rev-parse --abbrev-ref ${branch}@{upstream}`, { cwd: projectPath });
+      const { stdout } = await runGit(['rev-parse', '--abbrev-ref', `${branch}@{upstream}`], projectPath);
       trackingBranch = stdout.trim();
       remoteName = trackingBranch.split('/')[0]; // Extract remote name (e.g., "origin/main" -> "origin")
     } catch (error) {
@@ -453,9 +478,9 @@ router.get('/remote-status', async (req, res) => {
     }
 
     // Get ahead/behind counts
-    const { stdout: countOutput } = await execAsync(
-      `git rev-list --count --left-right ${trackingBranch}...HEAD`,
-      { cwd: projectPath }
+    const { stdout: countOutput } = await runGit(
+      ['rev-list', '--count', '--left-right', `${trackingBranch}...HEAD`],
+      projectPath
     );
     
     const [behind, ahead] = countOutput.trim().split('\t').map(Number);
@@ -488,19 +513,19 @@ router.post('/fetch', async (req, res) => {
     await validateGitRepository(projectPath);
 
     // Get current branch and its upstream remote
-    const { stdout: currentBranch } = await execAsync('git rev-parse --abbrev-ref HEAD', { cwd: projectPath });
+    const { stdout: currentBranch } = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath);
     const branch = currentBranch.trim();
 
     let remoteName = 'origin'; // fallback
     try {
-      const { stdout } = await execAsync(`git rev-parse --abbrev-ref ${branch}@{upstream}`, { cwd: projectPath });
+      const { stdout } = await runGit(['rev-parse', '--abbrev-ref', `${branch}@{upstream}`], projectPath);
       remoteName = stdout.trim().split('/')[0]; // Extract remote name
     } catch (error) {
       // No upstream, try to fetch from origin anyway
       // console.log('No upstream configured, using origin as fallback');
     }
 
-    const { stdout } = await execAsync(`git fetch ${remoteName}`, { cwd: projectPath });
+    const { stdout } = await runGit(['fetch', remoteName], projectPath);
     
     res.json({ success: true, output: stdout || 'Fetch completed successfully', remoteName });
   } catch (error) {
@@ -529,13 +554,13 @@ router.post('/pull', async (req, res) => {
     await validateGitRepository(projectPath);
 
     // Get current branch and its upstream remote
-    const { stdout: currentBranch } = await execAsync('git rev-parse --abbrev-ref HEAD', { cwd: projectPath });
+    const { stdout: currentBranch } = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath);
     const branch = currentBranch.trim();
 
     let remoteName = 'origin'; // fallback
     let remoteBranch = branch; // fallback
     try {
-      const { stdout } = await execAsync(`git rev-parse --abbrev-ref ${branch}@{upstream}`, { cwd: projectPath });
+      const { stdout } = await runGit(['rev-parse', '--abbrev-ref', `${branch}@{upstream}`], projectPath);
       const tracking = stdout.trim();
       remoteName = tracking.split('/')[0]; // Extract remote name
       remoteBranch = tracking.split('/').slice(1).join('/'); // Extract branch name
@@ -544,7 +569,7 @@ router.post('/pull', async (req, res) => {
       // console.log('No upstream configured, using origin/branch as fallback');
     }
 
-    const { stdout } = await execAsync(`git pull ${remoteName} ${remoteBranch}`, { cwd: projectPath });
+    const { stdout } = await runGit(['pull', remoteName, remoteBranch], projectPath);
     
     res.json({ 
       success: true, 
@@ -596,13 +621,13 @@ router.post('/push', async (req, res) => {
     await validateGitRepository(projectPath);
 
     // Get current branch and its upstream remote
-    const { stdout: currentBranch } = await execAsync('git rev-parse --abbrev-ref HEAD', { cwd: projectPath });
+    const { stdout: currentBranch } = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath);
     const branch = currentBranch.trim();
 
     let remoteName = 'origin'; // fallback
     let remoteBranch = branch; // fallback
     try {
-      const { stdout } = await execAsync(`git rev-parse --abbrev-ref ${branch}@{upstream}`, { cwd: projectPath });
+      const { stdout } = await runGit(['rev-parse', '--abbrev-ref', `${branch}@{upstream}`], projectPath);
       const tracking = stdout.trim();
       remoteName = tracking.split('/')[0]; // Extract remote name
       remoteBranch = tracking.split('/').slice(1).join('/'); // Extract branch name
@@ -611,7 +636,7 @@ router.post('/push', async (req, res) => {
       // console.log('No upstream configured, using origin/branch as fallback');
     }
 
-    const { stdout } = await execAsync(`git push ${remoteName} ${remoteBranch}`, { cwd: projectPath });
+    const { stdout } = await runGit(['push', remoteName, remoteBranch], projectPath);
     
     res.json({ 
       success: true, 
@@ -666,7 +691,7 @@ router.post('/discard', async (req, res) => {
     await validateGitRepository(projectPath);
 
     // Check file status to determine correct discard command
-    const { stdout: statusOutput } = await execAsync(`git status --porcelain "${file}"`, { cwd: projectPath });
+    const { stdout: statusOutput } = await runGit(['status', '--porcelain', file], projectPath);
     
     if (!statusOutput.trim()) {
       return res.status(400).json({ error: 'No changes to discard for this file' });
@@ -679,10 +704,10 @@ router.post('/discard', async (req, res) => {
       await fs.unlink(path.join(projectPath, file));
     } else if (status.includes('M') || status.includes('D')) {
       // Modified or deleted file - restore from HEAD
-      await execAsync(`git restore "${file}"`, { cwd: projectPath });
+      await runGit(['restore', file], projectPath);
     } else if (status.includes('A')) {
       // Added file - unstage it
-      await execAsync(`git reset HEAD "${file}"`, { cwd: projectPath });
+      await runGit(['reset', 'HEAD', file], projectPath);
     }
     
     res.json({ success: true, message: `Changes discarded for ${file}` });

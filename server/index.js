@@ -540,20 +540,20 @@ function handleShellConnection(ws) {
             return;
           }
           
-          // Build shell command that changes to project directory first, then runs gemini
-          let geminiCommand = geminiPath;
+          // Build shell command and arguments for gemini
+          let geminiArgs = [];
           
           if (hasSession && sessionId) {
-            // Try to resume session, but with fallback to new session if it fails
-            geminiCommand = `${geminiPath} --resume ${sessionId} || ${geminiPath}`;
+            // Use a shell script to try resuming session with fallback to new session
+            // We use positional parameters to safely pass the session ID
+            geminiArgs = ['-c', `${geminiPath} --resume "$1" || ${geminiPath}`, '--', sessionId];
+          } else {
+            geminiArgs = ['-c', geminiPath];
           }
           
-          // Create shell command that cds to the project directory first
-          const shellCommand = `cd "${projectPath}" && ${geminiCommand}`;
-          
-          
           // Start shell using PTY for proper terminal emulation
-          shellProcess = pty.spawn('bash', ['-c', shellCommand], {
+          // Use cwd to safely change to the project directory
+          shellProcess = pty.spawn('bash', geminiArgs, {
             name: 'xterm-256color',
             cols: 80,
             rows: 24,
