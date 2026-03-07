@@ -10,7 +10,8 @@
     "client": "vite --host",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "npm run build && npm run server"
+    "start": "npm run build && npm run server",
+    "test": "node --test src/lib/utils.test.js"
   },
   "keywords": [
     "gemini",
