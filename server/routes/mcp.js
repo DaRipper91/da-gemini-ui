@@ -237,7 +237,6 @@ function parseClaudeListOutput(output) {
     }
   }
   
-  console.log('🔍 Parsed Claude CLI servers:', servers);
   return servers;
 }
 
