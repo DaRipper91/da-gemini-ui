@@ -113,63 +113,38 @@ async function spawnGemini(command, options = {}, ws) {
     
     // Add MCP config flag only if MCP servers are configured
     try {
-      // Use already imported modules (fs.promises is imported as fs, path, os)
-      const fsSync = await import('fs'); // Import synchronous fs methods
-      
       // Check for MCP config in ~/.gemini.json
       const geminiConfigPath = path.join(os.homedir(), '.gemini.json');
       
+      let configData = null;
+      try {
+        configData = await fs.readFile(geminiConfigPath, 'utf8');
+      } catch (e) {
+        // File doesn't exist or other read error
+      }
       
-      let hasMcpServers = false;
-      
-      // Check Gemini config for MCP servers
-      if (fsSync.existsSync(geminiConfigPath)) {
+      if (configData) {
         try {
-          const geminiConfig = JSON.parse(fsSync.readFileSync(geminiConfigPath, 'utf8'));
+          const geminiConfig = JSON.parse(configData);
           
           // Check global MCP servers
-          if (geminiConfig.mcpServers && Object.keys(geminiConfig.mcpServers).length > 0) {
-            hasMcpServers = true;
-          }
+          const hasGlobalServers = geminiConfig.mcpServers && Object.keys(geminiConfig.mcpServers).length > 0;
           
           // Check project-specific MCP servers
-          if (!hasMcpServers && geminiConfig.geminiProjects) {
+          let hasProjectServers = false;
+          if (geminiConfig.geminiProjects) {
             const currentProjectPath = process.cwd();
             const projectConfig = geminiConfig.geminiProjects[currentProjectPath];
             if (projectConfig && projectConfig.mcpServers && Object.keys(projectConfig.mcpServers).length > 0) {
-              hasMcpServers = true;
+              hasProjectServers = true;
             }
+          }
+
+          if (hasGlobalServers || hasProjectServers) {
+            args.push('--mcp-config', geminiConfigPath);
           }
         } catch (e) {
-        }
-      }
-      
-      
-      if (hasMcpServers) {
-        // Use Gemini config file if it has MCP servers
-        let configPath = null;
-        
-        if (fsSync.existsSync(geminiConfigPath)) {
-          try {
-            const geminiConfig = JSON.parse(fsSync.readFileSync(geminiConfigPath, 'utf8'));
-            
-            // Check if we have any MCP servers (global or project-specific)
-            const hasGlobalServers = geminiConfig.mcpServers && Object.keys(geminiConfig.mcpServers).length > 0;
-            const currentProjectPath = process.cwd();
-            const projectConfig = geminiConfig.geminiProjects && geminiConfig.geminiProjects[currentProjectPath];
-            const hasProjectServers = projectConfig && projectConfig.mcpServers && Object.keys(projectConfig.mcpServers).length > 0;
-            
-            if (hasGlobalServers || hasProjectServers) {
-              configPath = geminiConfigPath;
-            }
-          } catch (e) {
-            // No valid config found
-          }
-        }
-        
-        if (configPath) {
-          args.push('--mcp-config', configPath);
-        } else {
+          // JSON parse error
         }
       }
     } catch (error) {
