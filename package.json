@@ -11,7 +11,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "npm run build && npm run server",
-    "test": "node --test src/lib/utils.test.js"
+    "test": "node --test \"src/**/*.test.js\""
   },
   "keywords": [
     "gemini",

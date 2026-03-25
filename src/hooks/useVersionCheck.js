@@ -1,6 +1,8 @@
 // hooks/useVersionCheck.js
 import { useState, useEffect } from 'react';
-import { version } from '../../package.json';
+import pkg from '../../package.json' with { type: 'json' };
+
+const { version } = pkg;
 
 export const useVersionCheck = (owner, repo) => {
   const [updateAvailable, setUpdateAvailable] = useState(false);
