@@ -39,6 +39,7 @@ import mime from 'mime-types';
 import { getProjects, getSessions, getSessionMessages, renameProject, deleteSession, deleteProject, addProjectManually, extractProjectDirectory, clearProjectDirectoryCache } from './projects.js';
 import { spawnGemini, abortGeminiSession } from './gemini-cli.js';
 import sessionManager from './sessionManager.js';
+import { isPathInside } from './utils/security.js';
 import gitRoutes from './routes/git.js';
 import authRoutes from './routes/auth.js';
 import mcpRoutes from './routes/mcp.js';
@@ -297,6 +298,12 @@ app.get('/api/projects/:projectName/file', authenticateToken, async (req, res) =
     if (!filePath || !path.isAbsolute(filePath)) {
       return res.status(400).json({ error: 'Invalid file path' });
     }
+
+    // Verify file path is within project directory
+    const projectPath = await extractProjectDirectory(projectName);
+    if (!isPathInside(filePath, projectPath)) {
+      return res.status(403).json({ error: 'Access denied: File is outside project directory' });
+    }
     
     const content = await fsPromises.readFile(filePath, 'utf8');
     res.json({ content, path: filePath });
@@ -326,6 +333,12 @@ app.get('/api/projects/:projectName/files/content', authenticateToken, async (re
     // Security check - ensure the path is safe and absolute
     if (!filePath || !path.isAbsolute(filePath)) {
       return res.status(400).json({ error: 'Invalid file path' });
+    }
+
+    // Verify file path is within project directory
+    const projectPath = await extractProjectDirectory(projectName);
+    if (!isPathInside(filePath, projectPath)) {
+      return res.status(403).json({ error: 'Access denied: File is outside project directory' });
     }
     
     // Check if file exists
@@ -371,6 +384,12 @@ app.put('/api/projects/:projectName/file', authenticateToken, async (req, res) =
     // Security check - ensure the path is safe and absolute
     if (!filePath || !path.isAbsolute(filePath)) {
       return res.status(400).json({ error: 'Invalid file path' });
+    }
+
+    // Verify file path is within project directory
+    const projectPath = await extractProjectDirectory(projectName);
+    if (!isPathInside(filePath, projectPath)) {
+      return res.status(403).json({ error: 'Access denied: File is outside project directory' });
     }
     
     if (content === undefined) {

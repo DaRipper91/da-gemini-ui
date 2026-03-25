@@ -3,6 +3,7 @@ import { spawn } from 'child_process';
 import path from 'path';
 import { promises as fs } from 'fs';
 import { extractProjectDirectory } from '../projects.js';
+import { isPathInside } from '../utils/security.js';
 
 const router = express.Router();
 
@@ -151,6 +152,12 @@ router.get('/diff', async (req, res) => {
   try {
     const projectPath = await getActualProjectPath(project);
     
+    // Security check - ensure file path is within project directory
+    const fullFilePath = path.isAbsolute(file) ? file : path.join(projectPath, file);
+    if (!isPathInside(fullFilePath, projectPath)) {
+      return res.status(403).json({ error: 'Access denied: File is outside project directory' });
+    }
+
     // Validate git repository
     await validateGitRepository(projectPath);
     
@@ -195,6 +202,14 @@ router.post('/commit', async (req, res) => {
   try {
     const projectPath = await getActualProjectPath(project);
     
+    // Security check - ensure all file paths are within project directory
+    for (const file of files) {
+      const fullFilePath = path.isAbsolute(file) ? file : path.join(projectPath, file);
+      if (!isPathInside(fullFilePath, projectPath)) {
+        return res.status(403).json({ error: `Access denied: File ${file} is outside project directory` });
+      }
+    }
+
     // Validate git repository
     await validateGitRepository(projectPath);
     
@@ -688,6 +703,13 @@ router.post('/discard', async (req, res) => {
 
   try {
     const projectPath = await getActualProjectPath(project);
+
+    // Security check - ensure file path is within project directory
+    const fullFilePath = path.isAbsolute(file) ? file : path.join(projectPath, file);
+    if (!isPathInside(fullFilePath, projectPath)) {
+      return res.status(403).json({ error: 'Access denied: File is outside project directory' });
+    }
+
     await validateGitRepository(projectPath);
 
     // Check file status to determine correct discard command
