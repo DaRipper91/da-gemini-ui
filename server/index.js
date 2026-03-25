@@ -161,7 +161,24 @@ const wss = new WebSocketServer({
   }
 });
 
-app.use(cors());
+// Configure CORS with restricted origins
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : [`http://localhost:${process.env.VITE_PORT || 4009}`, 'http://localhost:4008', 'http://127.0.0.1:4009', 'http://127.0.0.1:4008'];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps, curl, or same-origin)
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
 app.use(express.json());
 
 // Optional API key validation (if configured)
