@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { GitBranch, GitCommit, Plus, RefreshCw, Check, ChevronDown, ChevronRight, Info, History, FileText, Mic, Sparkles, Download, Trash2, AlertTriangle, Upload } from 'lucide-react';
+import { GitBranch, GitCommit, Plus, RefreshCw, Check, ChevronDown, ChevronRight, Info, History, FileText, Mic, Sparkles, Download, Trash2, AlertTriangle, Upload, X } from 'lucide-react';
 import { MicButton } from './MicButton.jsx';
 import { authenticatedFetch } from '../utils/api';
 
@@ -30,6 +30,7 @@ function GitPanel({ selectedProject, isMobile }) {
   const [isPushing, setIsPushing] = useState(false);
   const [isCommitAreaCollapsed, setIsCommitAreaCollapsed] = useState(isMobile); // Collapsed by default on mobile
   const [confirmAction, setConfirmAction] = useState(null); // { type: 'discard|commit|pull|push', file?: string, message?: string }
+  const [operationError, setOperationError] = useState(null);
   const textareaRef = useRef(null);
   const dropdownRef = useRef(null);
 
@@ -214,6 +215,7 @@ function GitPanel({ selectedProject, isMobile }) {
 
   const handlePull = async () => {
     setIsPulling(true);
+    setOperationError(null);
     try {
       const response = await authenticatedFetch('/api/git/pull', {
         method: 'POST',
@@ -230,10 +232,11 @@ function GitPanel({ selectedProject, isMobile }) {
         fetchRemoteStatus();
       } else {
         console.error('Pull failed:', data.error);
-        // TODO: Show user-friendly error message
+        setOperationError(data.error);
       }
     } catch (error) {
       console.error('Error pulling from remote:', error);
+      setOperationError(error.message || 'Error pulling from remote');
     } finally {
       setIsPulling(false);
     }
@@ -241,6 +244,7 @@ function GitPanel({ selectedProject, isMobile }) {
 
   const handlePush = async () => {
     setIsPushing(true);
+    setOperationError(null);
     try {
       const response = await authenticatedFetch('/api/git/push', {
         method: 'POST',
@@ -257,10 +261,11 @@ function GitPanel({ selectedProject, isMobile }) {
         fetchRemoteStatus();
       } else {
         console.error('Push failed:', data.error);
-        // TODO: Show user-friendly error message
+        setOperationError(data.error);
       }
     } catch (error) {
       console.error('Error pushing to remote:', error);
+      setOperationError(error.message || 'Error pushing to remote');
     } finally {
       setIsPushing(false);
     }
@@ -778,6 +783,24 @@ function GitPanel({ selectedProject, isMobile }) {
           </button>
         </div>
       </div>
+
+      {/* Error Message */}
+      {operationError && (
+        <div className="bg-red-50 dark:bg-red-900/20 p-3 mx-4 mt-2 rounded-lg border border-red-200 dark:border-red-800 flex items-start justify-between">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+            <div className="text-sm text-red-700 dark:text-red-300 break-all">
+              {operationError}
+            </div>
+          </div>
+          <button
+            onClick={() => setOperationError(null)}
+            className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-200"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Git Repository Not Found Message */}
       {gitStatus?.error ? (
